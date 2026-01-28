@@ -37,102 +37,45 @@ Outputs -
 * Recommend top 5 products based on interactions of similar users.
 
 Approach -
-# =====================================
-# SIMPLE USER-BASED RECOMMENDATION
-# =====================================
+* Here, user_id is of object, for our convenience we convert it to value of 0 to 1539(integer type).
+* We write a function to find similar users - 
+  1. Find the similarity score of the desired user with each user in the interaction matrix using cosine_similarity and append to an empty list and sort it.
+  2. extract the similar user and similarity scores from the sorted list 
+  3. remove original user and its similarity score and return the rest.
+* We write a function to recommend users - 
+  1. Call the previous similar users function to get the similar users for the desired user_id.
+  2. Find prod_ids with which the original user has interacted -> observed_interactions
+  3. For each similar user Find 'n' products with which the similar user has interacted with but not the actual user.
+  4. return the specified number of products. 
 
-"""
-WHAT THIS DOES (Super Simple):
+### **3) Model based Collaborative filtering**
+Objective -
+* Provide personalized recommendations to users based on their past behavior and preferences, while also addressing the challenges of sparsity and scalability that can arise in other collaborative filtering techniques.
 
-1. Find users similar to you (who rate things like you)
-2. See what THEY bought that YOU didn't
-3. Recommend those items!
+Outputs -
+* Recommend top 5 products for a particular user.
 
-Like: "Your friend likes same movies → recommend their favorites you missed"
-"""
+Approach -
+* Taking the matrix of product ratings and converting it to a CSR(compressed sparse row) matrix. This is done to save memory and computational time, since only the non-zero values need to be stored.
+* Performing singular value decomposition (SVD) on the sparse or csr matrix. SVD is a matrix decomposition technique that can be used to reduce the dimensionality of a matrix. In this case, the SVD is used to reduce the dimensionality of the matrix of product ratings to 50 latent features.
+* Calculating the predicted ratings for all users using SVD. The predicted ratings are calculated by multiplying the U matrix, the sigma matrix, and the Vt matrix.
+* Storing the predicted ratings in a DataFrame. The DataFrame has the same columns as the original matrix of product ratings. The rows of the DataFrame correspond to the users. The values in the DataFrame are the predicted ratings for each user.
+* A funtion is written to recommend products based on the rating predictions made : 
+  1. It gets the user's ratings from the interactions_matrix.
+  2. It gets the user's predicted ratings from the preds_matrix.
+  3. It creates a DataFrame with the user's actual and predicted ratings.
+  4. It adds a column to the DataFrame with the product names.
+  5. It filters the DataFrame to only include products that the user has not rated.
+  6. It sorts the DataFrame by the predicted ratings in descending order.
+  7. It prints the top num_recommendations products.
+* Evaluating the model :
+  1. Calculate the average rating for all the movies by dividing the sum of all the ratings by the number of ratings.
+  2, Calculate the average rating for all the predicted ratings by dividing the sum of all the predicted ratings by the number of ratings.
+  3. Create a DataFrame called rmse_df that contains the average actual ratings and the average predicted ratings.
+  4. Calculate the RMSE of the SVD model by taking the square root of the mean of the squared errors between the average actual ratings and the average predicted ratings.
 
-# Step 1: Convert text user_ids to numbers (0,1,2...)
-# Why? Math works better with numbers!
-user_ids = df['user_id'].astype('category').cat.codes  # "ABC" → 0, "XYZ" → 1
+> The squared parameter in the mean_squared_error function determines whether to return the mean squared error (MSE) or the root mean squared error (RMSE). When squared is set to False, the function returns the RMSE, which is the square root of the MSE. In this case, you are calculating the RMSE, so you have set squared to False. This means that the errors are first squared, then averaged, and finally square-rooted to obtain the RMSE.
+     
 
-# =====================================
-# FUNCTION 1: Find Similar Users
-# =====================================
-def find_similar_users(user_id, interaction_matrix, n_similar=5):
-    """
-    Finds TOP n_similar users who like same stuff as user_id
-    
-    STEPS:
-    1. Compare user_id with ALL users (cosine similarity)
-    2. Sort: most similar first  
-    3. Remove the user himself
-    4. Return top similar users + their similarity scores
-    """
-    
-    # Get THIS user's rating row
-    user_row = interaction_matrix[user_id:user_id+1].values[0]
-    
-    # Compare with ALL users
-    similarities = []
-    for i in range(len(interaction_matrix.index)):
-        other_row = interaction_matrix.iloc[i:i+1].values[0]
-        score = cosine_similarity([user_row], [other_row])[0][0]
-        similarities.append((i, score))  # (user_index, similarity_score)
-    
-    # Sort: highest similarity first
-    similarities.sort(key=lambda x: x[1], reverse=True)
-    
-    # Remove original user (similarity=1.0 to himself)
-    similar_users = [(idx, score) for idx, score in similarities if idx != user_id][:n_similar]
-    
-    return similar_users  # Returns: [(similar_user1, 0.95), (similar_user2, 0.85)...]
-
-# =====================================
-# FUNCTION 2: Get Recommendations
-# =====================================
-def recommend_products(user_id, interaction_matrix, n_products=10, n_similar=5):
-    """
-    GET PRODUCT RECOMMENDATIONS:
-    
-    1. Find similar users
-    2. What user ALREADY bought → ignore these
-    3. What similar users bought → recommend these!
-    """
-    
-    # Step 1: Get similar users
-    similar_users = find_similar_users(user_id, interaction_matrix, n_similar)
-    print(f"Top similar users: {similar_users}")
-    
-    # Step 2: What THIS user already interacted with
-    user_interactions = set(interaction_matrix.columns[interaction_matrix.iloc[user_id] > 0].tolist())
-    print(f"You already rated/bought: {len(user_interactions)} products")
-    
-    # Step 3: Collect recommendations from similar users
-    recommendations = []
-    
-    for sim_user_id, sim_score in similar_users:
-        # What THIS similar user bought
-        sim_user_products = set(interaction_matrix.columns[interaction_matrix.iloc[sim_user_id] > 0].tolist())
-        
-        # NEW products (similar user bought but YOU didn't)
-        new_products = list(sim_user_products - user_interactions)
-        
-        # Add with similarity weight (higher score = better rec)
-        for prod in new_products[:5]:  # Top 5 per similar user
-            recommendations.append((prod, sim_score))
-    
-    # Step 4: Sort by similarity score, get unique top n
-    recommendations.sort(key=lambda x: x[1], reverse=True)
-    top_products = list(dict.fromkeys([prod for prod, score in recommendations]))[:n_products]
-    
-    return top_products
-
-# =====================================
-# HOW TO USE:
-# =====================================
-user_id = 42  # Some user
-recommendations = recommend_products(user_id, user_item_matrix, n_products=10)
-
-print("YOUR RECOMMENDATIONS:")
-for i, prod_id in enumerate(recommendations, 1):
-    print(f"{i}. Product: {prod_id}")
+| ⚠️  This project is solely for learning how recommedation systems work. ⚠️ |
+|-----------------------------------------------------------------------------|
